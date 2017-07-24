@@ -168,8 +168,10 @@ function Get-Speed
             $remainingSeconds = ($eventargs.TotalBytesToSend - $eventargs.BytesSent) * 8 / 1MB / $averageSpeed
             $receivedSize = $eventargs.BytesSent | Get-FileSize
             $totalSize = $eventargs.TotalBytesToSend | Get-FileSize  
-                          
-            Write-Progress -Activity (" $url {0:N2} Mbps" -f $averageSpeed) -Status ("{0} of {1} ({2}% in {3})" -f $receivedSize,$totalSize,$eventargs.ProgressPercentage,$elapsed) -SecondsRemaining $remainingSeconds -PercentComplete $eventargs.ProgressPercentage
+            $percent = $eventargs.BytesSent / $eventargs.TotalBytesToSend * 100
+            $percent = [Math]::Round($percent)   
+                       
+            Write-Progress -Activity (" $url {0:N2} Mbps" -f $averageSpeed) -Status ("{0} of {1} ({2}% in {3})" -f $receivedSize,$totalSize,$percent,$elapsed) -SecondsRemaining $remainingSeconds -PercentComplete $percent
             if ($eventargs.ProgressPercentage -eq 100){
                 Write-Progress -Activity (" $url {0:N2} Mbps" -f $averageSpeed) -Status 'Done' -Completed
                 
@@ -179,8 +181,8 @@ function Get-Speed
             }
         }    
         $null = Register-ObjectEvent -InputObject $wc -EventName UploadDataCompleted -SourceIdentifier WebClient.UploadDataCompleted -Action { 
-            Unregister-Event -SourceIdentifier WebClient.UploadProgressChanged
-            Unregister-Event -SourceIdentifier WebClient.UploadDataCompleted
+            Unregister-Event -SourceIdentifier WebClient.UploadProgressChanged -Force
+            Unregister-Event -SourceIdentifier WebClient.UploadDataCompleted -Force
         }  
         try  {  
             $wc.UploadDataAsync($url,'POST',$byteArray) 
@@ -198,8 +200,7 @@ function Get-Speed
     # Wait until the state of DownloadProgressChange is Stopped
     Do {
     }
-    Until ($global:downchange.State -eq 'Stopped'){
-    } 
+    Until ($global:downchange.State -eq 'Stopped')
   
     Write-Output "Download: $global:down Mbps"
  
@@ -208,11 +209,10 @@ function Get-Speed
     Write-Output 'Testing upload speed...'
     Put-FileWCAsync -url $url -byteArray $bytearray -includeStats        
 
-    # Wait until the state of UploadProgressChange is Stopped
+    
     Do {
     }
-    Until ($global:upchange.State -eq 'Stopped'){
-    } 
+    Until ($global:upchange.State -eq 'Stopped')
   
     Write-Output "Upload: $global:upload Mbps"
     Write-Output 'Tests Completed' 
