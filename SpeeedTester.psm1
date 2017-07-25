@@ -1,5 +1,5 @@
 ﻿#Requires -Version 3
-function Get-Speed
+function Start-SpeedTest
 {
     <#
             .SYNOPSIS
@@ -78,7 +78,7 @@ function Get-Speed
 
 
     # Perform the Download Test
-    function Get-FileWCAsync{
+    function Get-DataWCAsync{
         param(
             [Parameter(Mandatory=$true)]
             $Url, 
@@ -115,7 +115,6 @@ function Get-Speed
             }
         }    
         $null = Register-ObjectEvent -InputObject $wc -EventName DownloadDataCompleted -SourceIdentifier WebClient.DownloadDataCompleted -Action { 
-            $global:output = $event.sourceeventargs.result 
             Unregister-Event -SourceIdentifier WebClient.DownloadProgressChanged
             Unregister-Event -SourceIdentifier WebClient.DownloadDataCompleted
         }
@@ -135,11 +134,11 @@ function Get-Speed
     $serverurlspilt = ($closestserver[0]).url -split 'upload'
     $url = $serverurlspilt[0] + 'random2000x2000.jpg'
     Write-Output 'Testing download speed...'
-    Get-FileWCAsync -Url $url -IncludeStats 
+    Get-DataWCAsync -Url $url -IncludeStats 
 
  
     # Perform the Upload Test
-    function Put-FileWCAsync{
+    function Push-DataWCAsync{
         param(
             [Parameter(Mandatory=$true)]
             $url, 
@@ -149,6 +148,10 @@ function Get-Speed
         $wc = New-Object Net.WebClient
         $wc.UseDefaultCredentials = $true
         $wc.Headers.Add("Content-Type","application/x-www-form-urlencoded") 
+        $wc.Headers.Add("Content-Type", "multipart/form-data; charset=ISO-8859-1; boundary=xz9xBzBYzZY")
+        $wc.Headers.Add("User-Agent", "Mozilla/4.0 (compatible; MSIE 6.0;Windows NT 5.1; .NET CLR 1.0.3705; .NET CLR 1.1.4322)")
+        $wc.Headers.Add("Cache-Control", "no-cache")
+        $wc.Headers.Add("Referer", "http://www.speedtest.net")
         $start = Get-Date 
         $global:upchange = Register-ObjectEvent -InputObject $wc -EventName UploadProgressChanged -MessageData @{start=$start;includeStats=$includeStats} -SourceIdentifier WebClient.UploadProgressChanged -Action { 
             filter Get-FileSize {
@@ -195,7 +198,6 @@ function Get-Speed
             $wc.Dispose()  
         }  
     }
-    
    
     # Wait until the state of DownloadProgressChange is Stopped
     Do {
@@ -204,12 +206,13 @@ function Get-Speed
   
     Write-Output "Download: $global:down Mbps"
  
-    [byte[]]$bytearray = $global:output
+    # Creating a random byte array to avoid bad download data messing with the upload
+    $bytearray = New-Object Byte[] 7864320
+    (New-Object Random).NextBytes($bytearray)
     $url = ($closestserver[0]).url
     Write-Output 'Testing upload speed...'
-    Put-FileWCAsync -url $url -byteArray $bytearray -includeStats        
+    Push-DataWCAsync -url $url -byteArray $bytearray -includeStats        
 
-    
     Do {
     }
     Until ($global:upchange.State -eq 'Stopped')
