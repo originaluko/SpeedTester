@@ -30,54 +30,53 @@ function Start-SpeedTest
     Param(
     )
 
-    Write-Output 'Retrieving configuration...'
+    # Server distance helper function 
+    function Get-ServerInfo {
+    
+        param(
+            [Parameter(Mandatory=$true)]
+            $servers 
+         )
+          
+        foreach($server in $servers) 
+        { 
+            $radius = 6371
+            [float]$dlat = ([float]$orilat - [float]$server.lat) * 3.14 / 180
+            [float]$dlon = ([float]$orilon - [float]$server.lon) * 3.14 / 180
+            [float]$a = [math]::Sin([float]$dlat/2) * [math]::Sin([float]$dlat/2) + [math]::Cos([float]$orilat * 3.14 / 180 ) * [math]::Cos([float]$server.lat * 3.14 / 180 ) * [math]::Sin([float]$dlon/2) * [math]::Sin([float]$dlon/2)
+            [float]$c = 2 * [math]::Atan2([math]::Sqrt([float]$a ), [math]::Sqrt(1 - [float]$a))
+            [float]$d = [float]$radius * [float]$c
 
-    $uri = 'http://beta.speedtest.net/speedtest-config.php'
-    [xml]$config = Invoke-WebRequest -Uri $uri -UseBasicParsing
-
-    $ip = $config.settings.client.ip
-    $isp = $config.settings.client.isp
-    Write-Output "Testing from $isp ($ip)"
-
-    $orilat = $config.settings.client.lat
-    $orilon = $config.settings.client.lon
-
-    Write-Output 'Retrieving server list...'
-
-    $uri = 'http://www.speedtest.net/speedtest-servers.php'
-    [xml]$hosts = Invoke-WebRequest -Uri $uri -UseBasicParsing
-
-    Write-Output 'Selecting closest server...'
-
-    $servers = $hosts.settings.servers.server
-
-    # Work out the distance of each server
-    $serverinformation = foreach($server in $servers) 
-    { 
-        $radius = 6371
-        [float]$dlat = ([float]$orilat - [float]$server.lat) * 3.14 / 180
-        [float]$dlon = ([float]$orilon - [float]$server.lon) * 3.14 / 180
-        [float]$a = [math]::Sin([float]$dlat/2) * [math]::Sin([float]$dlat/2) + [math]::Cos([float]$orilat * 3.14 / 180 ) * [math]::Cos([float]$server.lat * 3.14 / 180 ) * [math]::Sin([float]$dlon/2) * [math]::Sin([float]$dlon/2)
-        [float]$c = 2 * [math]::Atan2([math]::Sqrt([float]$a ), [math]::Sqrt(1 - [float]$a))
-        [float]$d = [float]$radius * [float]$c
-
-        New-Object PSObject -Property @{
-            Distance = $d
-            Country = $server.country
-            Sponsor = $server.sponsor
-            Url = $server.url
+            New-Object PSObject -Property @{
+                Distance = $d
+                Country = $server.country
+                Sponsor = $server.sponsor
+                Url = $server.url
+                Host = $server.host
+            }
         }
     }
 
-    # Sort the distance of each server
-    $closestserver = $serverinformation | Sort-Object -Property distance
+    # Avg Ping response helper function
+    function Get-AvgPing {  
+        param(
+            [Parameter(Mandatory=$true)]
+            $servers 
+        )
 
-    $location = $closestserver[0].sponsor
-    $distance = $closestserver[0].distance
-    Write-Output "Hosted by $location [$distance km]"
-
-
-    # Perform the Download Test
+        foreach ($server in $servers) { 
+     
+            $test = (Test-Connection -ComputerName $server -Count 4  | measure-Object -Property ResponseTime -Average).average 
+            $response = ($test -as [decimal] ) 
+    
+            New-Object PSObject -Property @{
+                'Destination' = $server
+                'Avg' = $response
+            }
+        } 
+    }
+    
+    # Download Test helper function
     function Get-DataWCAsync{
         param(
             [Parameter(Mandatory=$true)]
@@ -129,15 +128,8 @@ function Start-SpeedTest
             $wc.Dispose()  
         }  
     }
-
-     
-    $serverurlspilt = ($closestserver[0]).url -split 'upload'
-    $url = $serverurlspilt[0] + 'random2000x2000.jpg'
-    Write-Output 'Testing download speed...'
-    Get-DataWCAsync -Url $url -IncludeStats 
-
- 
-    # Perform the Upload Test
+    
+    # Upload Test helper function
     function Push-DataWCAsync{
         param(
             [Parameter(Mandatory=$true)]
@@ -198,6 +190,50 @@ function Start-SpeedTest
             $wc.Dispose()  
         }  
     }
+    
+    Write-Output 'Retrieving configuration...'
+
+    $uri = 'http://beta.speedtest.net/speedtest-config.php'
+    [xml]$config = Invoke-WebRequest -Uri $uri -UseBasicParsing
+
+    $ip = $config.settings.client.ip
+    $isp = $config.settings.client.isp
+    Write-Output "Testing from $isp ($ip)"
+
+    $orilat = $config.settings.client.lat
+    $orilon = $config.settings.client.lon
+
+    Write-Output 'Retrieving server list...'
+
+    $uri = 'http://www.speedtest.net/speedtest-servers.php'
+    [xml]$hosts = Invoke-WebRequest -Uri $uri -UseBasicParsing
+
+    Write-Output 'Selecting best server...'
+
+    $servers = $hosts.settings.servers.server
+        
+    # Sort the distance of each server
+    $closestserver = Get-ServerInfo -Servers $servers | Sort-Object -Property distance
+    
+    $servers = $closestserver[0],$closestserver[1],$closestserver[2]
+    $serverurlspilt = ($servers).host -split ':8080'
+    $servers = $serverurlspilt[0],$serverurlspilt[2],$serverurlspilt[4] 
+    
+    # Get avg ping response
+    $bestserver = Get-AvgPing -servers $servers
+
+    $index = 0
+    $minvalue = [decimal]::MaxValue
+    $bestserver.avg | % { if ($minvalue -gt $_) {$minvalue = $_; $minindex = $index}; $index++ }
+     
+    $location = $closestserver[$index].sponsor
+    $distance = $closestserver[$index].distance
+    Write-Output "Hosted by $location [$distance km] ($minvalue ms)"
+
+    $serverurlspilt = ($closestserver[$index]).url -split 'upload'
+    $url = $serverurlspilt[0] + 'random2000x2000.jpg'
+    Write-Output 'Testing download speed...'
+    Get-DataWCAsync -Url $url -IncludeStats 
    
     # Wait until the state of DownloadProgressChange is Stopped
     Do {
@@ -209,7 +245,7 @@ function Start-SpeedTest
     # Creating a random byte array to avoid bad download data messing with the upload
     $bytearray = New-Object Byte[] 7864320
     (New-Object Random).NextBytes($bytearray)
-    $url = ($closestserver[0]).url
+    $url = ($closestserver[$index]).url
     Write-Output 'Testing upload speed...'
     Push-DataWCAsync -url $url -byteArray $bytearray -includeStats        
 
