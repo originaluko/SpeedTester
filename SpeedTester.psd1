@@ -12,7 +12,7 @@
 RootModule = 'SpeedTester.psm1'
 
 # Version number of this module.
-ModuleVersion = '1.1.0'
+ModuleVersion = '1.1.1'
 
 # Supported PSEditions
 # CompatiblePSEditions = @()
@@ -24,7 +24,7 @@ GUID = '3c952e31-ea8d-4ba4-93d5-dc98f1ac1293'
 Author = 'Mark Ukotic'
 
 # Company or vendor of this module
-CompanyName = 'Unknown'
+CompanyName = 'Ukoticland'
 
 # Copyright statement for this module
 Copyright = '(c) 2017 Mark Ukotic. All rights reserved.'
@@ -107,7 +107,7 @@ PrivateData = @{
         # IconUri = ''
 
         # ReleaseNotes of this module
-        ReleaseNotes = 'Added latency check.  Started moving to nested/helper functions'
+        ReleaseNotes = 'Improved upload stability'
 
     } # End of PSData hashtable
 

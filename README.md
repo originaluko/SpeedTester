@@ -3,6 +3,8 @@ SpeedTester
 
 Report your internet Download and Upload speed.
 
+<img src="https://github.com/originaluko/SpeedTester/raw/master/sample_output.jpg"/>
+
 # Requirements
 
 At a minimum, make sure you have installed the following:
@@ -32,7 +34,7 @@ There is no special usage to run this module
 
 # Future
 
-Check x number of closest servers for latency and choose it for the test.
+Allow for modifying the download and upload size
 
 # Issues
 

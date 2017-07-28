@@ -6,12 +6,14 @@ function Start-SpeedTest
             Report your internet Download and Upload speed.
  
             .DESCRIPTION
-            Get-Speed leverages speedtest.net hosting servers.  Get-Speed will identify the closest hosting server
-            to you and perform a test download and upload.  It will then report the average Download and Upload in Mbps.
-            Get-Speed does not accept any parameters at this stage.
+            SpeedTester leverages speedtest.net hosting servers.  SpeedTester will identify the closest hosting servers
+            to you and pick the one with the lowest latency to perform a test download and upload.  It will then report 
+            the average Download and Upload in Mbps.
+            
+            Start-SpeedTest does not accept any parameters at this stage.
 
             .EXAMPLE
-            Get-Speed
+            Start-SpeedTest
 
             .INPUTS
             None
@@ -20,7 +22,7 @@ function Start-SpeedTest
             Author:  Mark Ukotic
             Website: http://blog.ukotic.net
             Twitter: @originaluko
-            GitHub: 
+            GitHub:  https://github.com/originaluko/
 
             .LINKS
 
@@ -84,9 +86,14 @@ function Start-SpeedTest
             [switch]$IncludeStats
         )
         $wc = New-Object Net.WebClient
-        $wc.UseDefaultCredentials = $true
+        $wc.UseDefaultCredentials = $false
+        $wc.Headers.Add("Content-Type","application/x-www-form-urlencoded") 
+        $wc.Headers.Add("Accept: text/html, application/xhtml+xml, */*")
+        $wc.Headers.Add("User-Agent", "Mozilla/4.0 (compatible; MSIE 6.0;Windows NT 5.1; .NET CLR 1.0.3705; .NET CLR 1.1.4322)")
+        $wc.Headers.Add("Cache-Control", "no-cache")
+        $wc.Headers.Add("Referer", "http://www.speedtest.net")
         $start = Get-Date 
-        $global:downchange = Register-ObjectEvent -InputObject $wc -EventName DownloadProgressChanged -MessageData @{start=$start;includeStats=$includestats} -SourceIdentifier WebClient.DownloadProgressChanged -Action { 
+        $null = Register-ObjectEvent -InputObject $wc -EventName DownloadProgressChanged -MessageData @{start=$start;includeStats=$includestats} -SourceIdentifier WebClient.DownloadProgressChanged -Action { 
             filter Get-FileSize {
                 "{0:N2} {1}" -f $(
                     if ($_ -lt 1kb) { $_, 'Bytes' }
@@ -109,7 +116,7 @@ function Start-SpeedTest
                 Write-Progress -Activity (" $url {0:N2} Mbps" -f $averagespeed) -Status 'Done' -Completed
                 
                 if ($event.MessageData.includeStats.IsPresent){
-                    $global:down = [Math]::Round($averageSpeed, 2)
+                    $global:down = [Math]::Round($averageSpeed, 2) 
                  } 
             }
         }    
@@ -125,7 +132,8 @@ function Start-SpeedTest
             Write-Warning "Download of $url failed"  
         }   
         finally  {    
-            $wc.Dispose()  
+            while ($wc.IsBusy) {}
+            $wc.Dispose() 
         }  
     }
     
@@ -138,14 +146,14 @@ function Start-SpeedTest
             [switch]$includeStats
         )
         $wc = New-Object Net.WebClient
-        $wc.UseDefaultCredentials = $true
+        $wc.UseDefaultCredentials = $false
         $wc.Headers.Add("Content-Type","application/x-www-form-urlencoded") 
-        $wc.Headers.Add("Content-Type", "multipart/form-data; charset=ISO-8859-1; boundary=xz9xBzBYzZY")
+        $wc.Headers.Add("Accept: text/html, application/xhtml+xml, */*")
         $wc.Headers.Add("User-Agent", "Mozilla/4.0 (compatible; MSIE 6.0;Windows NT 5.1; .NET CLR 1.0.3705; .NET CLR 1.1.4322)")
         $wc.Headers.Add("Cache-Control", "no-cache")
         $wc.Headers.Add("Referer", "http://www.speedtest.net")
         $start = Get-Date 
-        $global:upchange = Register-ObjectEvent -InputObject $wc -EventName UploadProgressChanged -MessageData @{start=$start;includeStats=$includeStats} -SourceIdentifier WebClient.UploadProgressChanged -Action { 
+        $null = Register-ObjectEvent -InputObject $wc -EventName UploadProgressChanged -MessageData @{start=$start;includeStats=$includeStats} -SourceIdentifier WebClient.UploadProgressChanged -Action { 
             filter Get-FileSize {
                 "{0:N2} {1}" -f $(
                     if ($_ -lt 1kb) { $_, 'Bytes' }
@@ -171,24 +179,26 @@ function Start-SpeedTest
                 Write-Progress -Activity (" $url {0:N2} Mbps" -f $averageSpeed) -Status 'Done' -Completed
                 
                 if ($event.MessageData.includeStats.IsPresent){
-                    $global:upload = [Math]::Round($averageSpeed, 2)
-                 } 
+                    $global:upload = [Math]::Round($averageSpeed, 2) 
+                }
             }
         }    
-        $null = Register-ObjectEvent -InputObject $wc -EventName UploadDataCompleted -SourceIdentifier WebClient.UploadDataCompleted -Action { 
-            Unregister-Event -SourceIdentifier WebClient.UploadProgressChanged -Force
-            Unregister-Event -SourceIdentifier WebClient.UploadDataCompleted -Force
-        }  
+        # $null = Register-ObjectEvent -InputObject $wc -EventName UploadDataCompleted -SourceIdentifier WebClient.UploadDataCompleted -Action { 
+        #    Unregister-Event -SourceIdentifier WebClient.UploadProgressChanged -Force
+        #    Unregister-Event -SourceIdentifier WebClient.UploadDataCompleted -Force
+        # }  
+        
         try  {  
             $wc.UploadDataAsync($url,'POST',$byteArray) 
-        
         }  
         catch [System.Net.WebException]  {  
             Write-Warning "Upload of $url failed"  
         }   
-        finally  {    
+        finally  { 
+            while ($wc.IsBusy) {}   
             $wc.Dispose()  
-        }  
+            Remove-Job * -Force
+        }
     }
     
     Write-Output 'Retrieving configuration...'
@@ -222,9 +232,10 @@ function Start-SpeedTest
     # Get avg ping response
     $bestserver = Get-AvgPing -servers $servers
 
+    # Getting lazy and just want lowest latency server asap
     $index = 0
     $minvalue = [decimal]::MaxValue
-    $bestserver.avg | % { if ($minvalue -gt $_) {$minvalue = $_; $minindex = $index}; $index++ }
+    $bestserver.avg | ForEach-Object { if ($minvalue -gt $_) {$minvalue = $_; $minindex = $index}; $index++ }
      
     $location = $closestserver[$index].sponsor
     $distance = $closestserver[$index].distance
@@ -234,26 +245,17 @@ function Start-SpeedTest
     $url = $serverurlspilt[0] + 'random2000x2000.jpg'
     Write-Output 'Testing download speed...'
     Get-DataWCAsync -Url $url -IncludeStats 
-   
-    # Wait until the state of DownloadProgressChange is Stopped
-    Do {
-    }
-    Until ($global:downchange.State -eq 'Stopped')
-  
-    Write-Output "Download: $global:down Mbps"
+      
+    Write-Output "Download: $down Mbps"
  
     # Creating a random byte array to avoid bad download data messing with the upload
     $bytearray = New-Object Byte[] 7864320
     (New-Object Random).NextBytes($bytearray)
+    
     $url = ($closestserver[$index]).url
     Write-Output 'Testing upload speed...'
     Push-DataWCAsync -url $url -byteArray $bytearray -includeStats        
 
-    Do {
-    }
-    Until ($global:upchange.State -eq 'Stopped')
-  
-    Write-Output "Upload: $global:upload Mbps"
+    Write-Output "Upload: $upload Mbps"
     Write-Output 'Tests Completed' 
-
 }
