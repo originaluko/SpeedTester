@@ -34,7 +34,7 @@ There is no special usage to run this module
 
 # Future
 
-Allow for modifying the download and upload size
+Improve error handling which is current fairly poor.
 
 # Issues
 

@@ -2,34 +2,50 @@
 function Start-SpeedTest
 {
     <#
-            .SYNOPSIS
-            Report your internet Download and Upload speed.
+        .SYNOPSIS
+        Report your internet Download and Upload speed.
  
-            .DESCRIPTION
-            SpeedTester leverages speedtest.net hosting servers.  SpeedTester will identify the closest hosting servers
-            to you and pick the one with the lowest latency to perform a test download and upload.  It will then report 
-            the average Download and Upload in Mbps.
+        .DESCRIPTION
+        SpeedTester leverages speedtest.net hosting servers.  SpeedTester will identify the closest hosting servers
+        to you and pick the one with the lowest latency to perform a test download and upload.  It will then report 
+        the average Download and Upload in Mbps.
             
-            Start-SpeedTest does not accept any parameters at this stage.
+        Start-SpeedTest does not accept any parameters at this stage.
 
-            .EXAMPLE
-            Start-SpeedTest
+        .EXAMPLE
+        Start-SpeedTest
+        Runs SpeedTester with default Download and Upload parameters
 
-            .INPUTS
-            None
+        .EXAMPLE
+        Start-SpeedTest -DownloadMB 10 -Upload 10
+        Runs SpeedTester with a download size of 10 MB and an Upload size of 10 MB.  
+        Valid range is 1 - 30 for both Download and Upload represented in MB only.
+            
+        .EXAMPLE
+        Start-SpeedTest -DownloadMB 20 -Verbose
+        Runs SpeedTester with a download size of 20 MB with Verbose logging
+            
+        .INPUTS
+        None
  
-            .NOTES
-            Author:  Mark Ukotic
-            Website: http://blog.ukotic.net
-            Twitter: @originaluko
-            GitHub:  https://github.com/originaluko/
+        .NOTES
+        Author:  Mark Ukotic
+        Website: http://blog.ukotic.net
+        Twitter: @originaluko
+        GitHub:  https://github.com/originaluko/
 
-            .LINKS
+        .LINK
+        https://github.com/originaluko/SpeedTester
 
     #>
 
     [CmdletBinding()]
     Param(
+        [Parameter()]
+        [ValidateRange(1,30)]
+        [Double]$UploadMB = "7.5",
+        [ValidateRange(1,30)]
+        [Double]$DownloadMB = "7.5"
     )
 
     # Server distance helper function 
@@ -38,7 +54,7 @@ function Start-SpeedTest
         param(
             [Parameter(Mandatory=$true)]
             $servers 
-         )
+        )
           
         foreach($server in $servers) 
         { 
@@ -68,14 +84,25 @@ function Start-SpeedTest
 
         foreach ($server in $servers) { 
      
-            $test = (Test-Connection -ComputerName $server -Count 4  | measure-Object -Property ResponseTime -Average).average 
-            $response = ($test -as [decimal] ) 
-    
-            New-Object PSObject -Property @{
-                'Destination' = $server
-                'Avg' = $response
+            try {
+                Write-Verbose "Testing ping to $server"
+                $test = (Test-Connection -ComputerName $server -Count 4 -ErrorAction Stop | measure-Object -Property ResponseTime -Average).average 
+                $response = ($test -as [decimal] ) 
+            }   
+            catch [System.Net.NetworkInformation.PingException] {
+                Write-Warning "$server is offline."
+            } 
+            catch {
+                Write-Warning "Ping test failed for $server"
+            }   
+            finally {
+                New-Object PSObject -Property @{
+                    'Destination' = $server
+                    'Avg' = $response
+                }    
+                Write-Verbose "$response ms average ping to $server"
             }
-        } 
+        }
     }
     
     # Download Test helper function
@@ -83,9 +110,12 @@ function Start-SpeedTest
         param(
             [Parameter(Mandatory=$true)]
             $Url, 
-            [switch]$IncludeStats
+            [switch]$IncludeStats,
+            [ValidateRange(1,30)]
+            [Double]$DownloadMB = "7.5"
         )
-        $wc = New-Object Net.WebClient
+        $global:download = ($DownloadMB * 1mb)
+        $global:wc = New-Object Net.WebClient
         $wc.UseDefaultCredentials = $false
         $wc.Headers.Add("Content-Type","application/x-www-form-urlencoded") 
         $wc.Headers.Add("Accept: text/html, application/xhtml+xml, */*")
@@ -109,15 +139,22 @@ function Start-SpeedTest
             $elapsed = $Time.ToString('hh\:mm\:ss')
             $remainingseconds = ($eventargs.TotalBytesToReceive - $eventargs.BytesReceived) * 8 / 1MB / $averagespeed
             $receivedsize = $eventargs.BytesReceived | Get-FileSize
-            $totalSize = $eventargs.TotalBytesToReceive | Get-FileSize  
+            $received = $eventargs.BytesReceived
+            $totalSize = $download | Get-FileSize 
+            $percent = $eventargs.BytesReceived / $download * 100
+            $percent = [Math]::Round($percent)  
+            
+            If ($received -ge $download) {
+                $wc.CancelAsync()
+            }
                           
-            Write-Progress -Activity (" $url {0:N2} Mbps" -f $averagespeed) -Status ("{0} of {1} ({2}% in {3})" -f $receivedSize,$totalsize,$eventargs.ProgressPercentage,$elapsed) -SecondsRemaining $remainingseconds -PercentComplete $eventargs.ProgressPercentage
-            if ($eventargs.ProgressPercentage -eq 100){
+            Write-Progress -Activity (" $url {0:N2} Mbps" -f $averagespeed) -Status ("{0} of {1} ({2}% in {3})" -f $receivedSize,$totalsize,$percent,$elapsed) -SecondsRemaining $remainingseconds -PercentComplete $percent
+            if ($percent -eq 100){
                 Write-Progress -Activity (" $url {0:N2} Mbps" -f $averagespeed) -Status 'Done' -Completed
                 
                 if ($event.MessageData.includeStats.IsPresent){
                     $global:down = [Math]::Round($averageSpeed, 2) 
-                 } 
+                } 
             }
         }    
         $null = Register-ObjectEvent -InputObject $wc -EventName DownloadDataCompleted -SourceIdentifier WebClient.DownloadDataCompleted -Action { 
@@ -126,6 +163,7 @@ function Start-SpeedTest
         }
     
         try  {  
+            Write-Verbose "Performing download from $url"
             $wc.DownloadDataAsync($url)  
         }  
         catch [System.Net.WebException]  {  
@@ -189,6 +227,7 @@ function Start-SpeedTest
         # }  
         
         try  {  
+            Write-Verbose "Performing upload to $url"
             $wc.UploadDataAsync($url,'POST',$byteArray) 
         }  
         catch [System.Net.WebException]  {  
@@ -204,7 +243,13 @@ function Start-SpeedTest
     Write-Output 'Retrieving configuration...'
 
     $uri = 'http://beta.speedtest.net/speedtest-config.php'
-    [xml]$config = Invoke-WebRequest -Uri $uri -UseBasicParsing
+    try {
+        [xml]$config = Invoke-WebRequest -Uri $uri -UseBasicParsing -ErrorAction Stop
+    }
+    catch {
+        Write-Error "Could not download configuration from $uri"
+        Break
+    }
 
     $ip = $config.settings.client.ip
     $isp = $config.settings.client.isp
@@ -216,7 +261,13 @@ function Start-SpeedTest
     Write-Output 'Retrieving server list...'
 
     $uri = 'http://www.speedtest.net/speedtest-servers.php'
-    [xml]$hosts = Invoke-WebRequest -Uri $uri -UseBasicParsing
+    try {
+        [xml]$hosts = Invoke-WebRequest -Uri $uri -UseBasicParsing -ErrorAction Stop
+    }
+    catch {
+        Write-Error "Could not download server list from $uri"
+        Break
+    }
 
     Write-Output 'Selecting best server...'
 
@@ -242,20 +293,29 @@ function Start-SpeedTest
     Write-Output "Hosted by $location [$distance km] ($minvalue ms)"
 
     $serverurlspilt = ($closestserver[$index]).url -split 'upload'
-    $url = $serverurlspilt[0] + 'random2000x2000.jpg'
+    $url = $serverurlspilt[0] + "random4000x4000.jpg"
+    
     Write-Output 'Testing download speed...'
-    Get-DataWCAsync -Url $url -IncludeStats 
+    Get-DataWCAsync -Url $url -DownloadMB $downloadmb -IncludeStats 
       
-    Write-Output "Download: $down Mbps"
+    if ($down -eq $null) {
+    Write-Output "Oh no, we couldn't calculate download average"}
+    else {
+        Write-Output "Download: $down Mbps"
+    }
  
     # Creating a random byte array to avoid bad download data messing with the upload
-    $bytearray = New-Object Byte[] 7864320
+    $bytearray = New-Object Byte[] ($uploadmb * 1mb)
     (New-Object Random).NextBytes($bytearray)
     
     $url = ($closestserver[$index]).url
     Write-Output 'Testing upload speed...'
     Push-DataWCAsync -url $url -byteArray $bytearray -includeStats        
 
-    Write-Output "Upload: $upload Mbps"
+    if ($upload -eq $null) {
+    Write-Output "Oh no, we couldn't calculate upload average"}
+    else {
+        Write-Output "Upload: $upload Mbps"
+    }
     Write-Output 'Tests Completed' 
 }
